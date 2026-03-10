@@ -412,20 +412,6 @@ async function run() {
     console.log('fetchMonthTicketInfo:', JSON.stringify(infoResponse));
 
     if (BUY_GREEN_GIFT) {
-      const gainReviveCoinWrapper = await channel.sendRequest(
-        '.lq.Lobby.gainReviveCoin',
-        encode(proto.ReqCommon, {})
-      );
-      const gainReviveCoinResponse = decode(proto.ResCommon, gainReviveCoinWrapper.data);
-      const gainReviveCoinErrorCode = Number(gainReviveCoinResponse?.error?.code ?? 0);
-      if (gainReviveCoinErrorCode === 0) {
-        console.log('gainReviveCoin: success');
-      } else {
-        console.log('gainReviveCoin: skipped', JSON.stringify(gainReviveCoinResponse));
-      }
-      const latestGold = loginGold + (gainReviveCoinErrorCode === 0 ? REVIVE_COIN_GOLD_BONUS : 0);
-      console.log('estimatedGoldForPurchase:', latestGold);
-
       const shopInfoWrapper = await channel.sendRequest(
         '.lq.Lobby.fetchShopInfo',
         encode(proto.ReqCommon, {})
@@ -438,7 +424,7 @@ async function run() {
       console.log('fetchShopInfo.shop_info.zhp.goods:', JSON.stringify(zhpGoods));
 
       const greenGoodsIds = zhpGoods.slice(0, 4).map(Number).filter(id => Number.isInteger(id) && id > 0);
-      const maxTotalBuyable = Math.floor(latestGold / GREEN_GIFT_PRICE_GOLD);
+      const maxTotalBuyable = Math.floor(loginGold / GREEN_GIFT_PRICE_GOLD);
       let remainingPurchaseCount = Math.min(
         maxTotalBuyable,
         greenGoodsIds.length * GREEN_GIFT_MAX_COUNT_PER_GOODS
@@ -447,6 +433,9 @@ async function run() {
       const purchasePlan = [];
 
       for (const goodsId of greenGoodsIds) {
+        if (loginGold - spentGold < 18000) {
+          break;
+        }
         if (remainingPurchaseCount <= 0) {
           break;
         }
@@ -477,6 +466,20 @@ async function run() {
         remainingPurchaseCount -= count;
         spentGold += count * GREEN_GIFT_PRICE_GOLD;
       }
+            const gainReviveCoinWrapper = await channel.sendRequest(
+        '.lq.Lobby.gainReviveCoin',
+        encode(proto.ReqCommon, {})
+      );
+      
+      const gainReviveCoinResponse = decode(proto.ResCommon, gainReviveCoinWrapper.data);
+      const gainReviveCoinErrorCode = Number(gainReviveCoinResponse?.error?.code ?? 0);
+      if (gainReviveCoinErrorCode === 0) {
+        console.log('gainReviveCoin: success');
+      } else {
+        console.log('gainReviveCoin: skipped', JSON.stringify(gainReviveCoinResponse));
+      }
+      const latestGold = loginGold + (gainReviveCoinErrorCode === 0 ? REVIVE_COIN_GOLD_BONUS : 0);
+      console.log('estimatedGoldForPurchase:', latestGold);
 
       console.log('buyFromZHP.purchasePlan:', JSON.stringify(purchasePlan));
       console.log('buyFromZHP.spentGold:', spentGold);
