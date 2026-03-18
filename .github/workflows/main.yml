@@ -2,7 +2,7 @@ name: Login to Majsoul
 
 on:
   schedule:
-    - cron: '21 21 * * *'  # 21:21 UTC time (6:21 a.m. Korean time)
+    - cron: '30 22 * * *'  # 22:30 UTC time (7:30 a.m. Korean time)
   workflow_dispatch:
 
 jobs:
