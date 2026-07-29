@@ -527,17 +527,7 @@ async function runActions(session) {
     return;
   }
 
-  const gainReviveCoinResponse = await common('.lq.Lobby.gainReviveCoin', proto.ResCommon);
-  const gainReviveCoinErrorCode = Number(gainReviveCoinResponse?.error?.code ?? 0);
-  if (gainReviveCoinErrorCode === 0) {
-    console.log('gainReviveCoin: success');
-  } else {
-    console.log('gainReviveCoin: skipped', JSON.stringify(gainReviveCoinResponse));
-  }
-
-  const latestGold = loginGold + (gainReviveCoinErrorCode === 0 ? REVIVE_COIN_GOLD_BONUS : 0);
-  console.log('estimatedGoldForPurchase:', latestGold);
-
+  // 1. 상점 정보를 불러와서 로그인 골드(loginGold) 기준으로 녹색 선물 먼저 구매
   const shopInfoResponse = await common('.lq.Lobby.fetchShopInfo', proto.ResShopInfo);
   const zhpGoods = shopInfoResponse.shop_info?.zhp?.goods;
   if (!zhpGoods) {
@@ -546,7 +536,7 @@ async function runActions(session) {
   console.log('fetchShopInfo.shop_info.zhp.goods:', JSON.stringify(zhpGoods));
 
   const greenGoodsIds = zhpGoods.slice(0, 4).map(Number).filter(id => Number.isInteger(id) && id > 0);
-  const maxTotalBuyable = Math.floor(latestGold / GREEN_GIFT_PRICE_GOLD);
+  const maxTotalBuyable = Math.floor(loginGold / GREEN_GIFT_PRICE_GOLD);
   let remainingPurchaseCount = Math.min(maxTotalBuyable, greenGoodsIds.length * GREEN_GIFT_MAX_COUNT_PER_GOODS);
   let spentGold = 0;
   const purchasePlan = [];
@@ -583,8 +573,22 @@ async function runActions(session) {
 
   console.log('buyFromZHP.purchasePlan:', JSON.stringify(purchasePlan));
   console.log('buyFromZHP.spentGold:', spentGold);
-  console.log('buyFromZHP.remainingGoldEstimate:', Math.max(0, latestGold - spentGold));
+  console.log('buyFromZHP.remainingGoldEstimate:', Math.max(0, loginGold - spentGold));
+
+  // 2. 상점 구매가 끝난 뒤에 부활 코인(골드 보상) 수령
+  const gainReviveCoinResponse = await common('.lq.Lobby.gainReviveCoin', proto.ResCommon);
+  const gainReviveCoinErrorCode = Number(gainReviveCoinResponse?.error?.code ?? 0);
+  if (gainReviveCoinErrorCode === 0) {
+    console.log('gainReviveCoin: success');
+  } else {
+    console.log('gainReviveCoin: skipped', JSON.stringify(gainReviveCoinResponse));
+  }
+
+  // 3. 상점에서 쓰고 남은 골드 + 보상 받은 골드를 합산하여 최종 골드 계산
+  const finalGold = Math.max(0, loginGold - spentGold) + (gainReviveCoinErrorCode === 0 ? REVIVE_COIN_GOLD_BONUS : 0);
+  console.log('finalEstimatedGold:', finalGold);
 }
+
 
 function loadRuntimeConfig() {
   const server = getServerConfig(process.env.MS_SERVER);
