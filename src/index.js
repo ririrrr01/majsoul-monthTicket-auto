@@ -523,59 +523,65 @@ async function runActions(session) {
   const infoResponse = await common('.lq.Lobby.fetchMonthTicketInfo', proto.ResFetchMonthTicketInfo);
   console.log('fetchMonthTicketInfo:', JSON.stringify(infoResponse));
 
-  if (!BUY_GREEN_GIFT) {
-    return;
-  }
-
-  // 1. 상점 정보를 불러와서 로그인 골드(loginGold) 기준으로 녹색 선물 먼저 구매
-  const shopInfoResponse = await common('.lq.Lobby.fetchShopInfo', proto.ResShopInfo);
-  const zhpGoods = shopInfoResponse.shop_info?.zhp?.goods;
-  if (!zhpGoods) {
-    fail('fetchShopInfo failed: shop_info.zhp not found.');
-  }
-  console.log('fetchShopInfo.shop_info.zhp.goods:', JSON.stringify(zhpGoods));
-
-  const greenGoodsIds = zhpGoods.slice(0, 4).map(Number).filter(id => Number.isInteger(id) && id > 0);
-  const maxTotalBuyable = Math.floor(loginGold / GREEN_GIFT_PRICE_GOLD);
-  let remainingPurchaseCount = Math.min(maxTotalBuyable, greenGoodsIds.length * GREEN_GIFT_MAX_COUNT_PER_GOODS);
   let spentGold = 0;
   const purchasePlan = [];
 
-  for (const goodsId of greenGoodsIds) {
-    if (remainingPurchaseCount <= 0) {
-      break;
+  if (BUY_GREEN_GIFT && loginGold >= GREEN_GIFT_PRICE_GOLD) {
+    const shopInfoResponse = await common('.lq.Lobby.fetchShopInfo', proto.ResShopInfo);
+    const zhpGoods = shopInfoResponse.shop_info?.zhp?.goods;
+    if (!zhpGoods) {
+      fail('fetchShopInfo failed: shop_info.zhp not found.');
     }
+    console.log('fetchShopInfo.shop_info.zhp.goods:', JSON.stringify(zhpGoods));
 
-    const count = Math.min(GREEN_GIFT_MAX_COUNT_PER_GOODS, remainingPurchaseCount);
-    const buyResponse = await call(
-      '.lq.Lobby.buyFromZHP',
-      proto.ReqBuyFromZHP,
-      { goods_id: goodsId, count },
-      proto.ResCommon
-    );
-    const errorCode = Number(buyResponse?.error?.code ?? 0);
+    const greenGoodsIds = zhpGoods.slice(0, 4).map(Number).filter(id => Number.isInteger(id) && id > 0);
+    const maxTotalBuyable = Math.floor(loginGold / GREEN_GIFT_PRICE_GOLD);
+    let remainingPurchaseCount = Math.min(maxTotalBuyable, greenGoodsIds.length * GREEN_GIFT_MAX_COUNT_PER_GOODS);
 
-    if (errorCode === BUY_FROM_ZHP_LIMIT_REACHED_CODE) {
-      console.log(
-        `buyFromZHP: skip all purchases for this run (goods_id=${goodsId}, count=${count}, purchase limit reached):`,
-        JSON.stringify(buyResponse)
+    for (const goodsId of greenGoodsIds) {
+      if (remainingPurchaseCount <= 0) {
+        break;
+      }
+
+      const count = Math.min(GREEN_GIFT_MAX_COUNT_PER_GOODS, remainingPurchaseCount);
+      
+      const buyResponse = await call(
+        '.lq.Lobby.buyFromZHP',
+        proto.ReqBuyFromZHP,
+        { goods_id: goodsId, count },
+        proto.ResCommon
       );
-      break;
-    }
-    if (errorCode !== 0) {
-      fail(`buyFromZHP failed for goods_id=${goodsId} count=${count}: ${JSON.stringify(buyResponse)}`);
+      const errorCode = Number(buyResponse?.error?.code ?? 0);
+
+      if (errorCode === BUY_FROM_ZHP_LIMIT_REACHED_CODE) {
+        console.log(
+          `buyFromZHP: skip all purchases for this run (goods_id=${goodsId}, count=${count}, purchase limit reached):`,
+          JSON.stringify(buyResponse)
+        );
+        break;
+      }
+      if (errorCode !== 0) {
+        fail(`buyFromZHP failed for goods_id=${goodsId} count=${count}: ${JSON.stringify(buyResponse)}`);
+      }
+
+      purchasePlan.push({ goods_id: goodsId, count });
+      remainingPurchaseCount -= count;
+      spentGold += count * GREEN_GIFT_PRICE_GOLD;
+
+      const currentRemainingGold = loginGold - spentGold;
+
+      if (currentRemainingGold >= 15000 && currentRemainingGold < 18000) {
+        break;
+      }
     }
 
-    purchasePlan.push({ goods_id: goodsId, count });
-    remainingPurchaseCount -= count;
-    spentGold += count * GREEN_GIFT_PRICE_GOLD;
+    console.log('buyFromZHP.purchasePlan:', JSON.stringify(purchasePlan));
+    console.log('buyFromZHP.spentGold:', spentGold);
+    console.log('buyFromZHP.remainingGoldEstimate:', Math.max(0, loginGold - spentGold));
+  } else {
+    console.log('Skipping shop purchases due to settings or insufficient gold (< 15000).');
   }
 
-  console.log('buyFromZHP.purchasePlan:', JSON.stringify(purchasePlan));
-  console.log('buyFromZHP.spentGold:', spentGold);
-  console.log('buyFromZHP.remainingGoldEstimate:', Math.max(0, loginGold - spentGold));
-
-  // 2. 상점 구매가 끝난 뒤에 부활 코인(골드 보상) 수령
   const gainReviveCoinResponse = await common('.lq.Lobby.gainReviveCoin', proto.ResCommon);
   const gainReviveCoinErrorCode = Number(gainReviveCoinResponse?.error?.code ?? 0);
   if (gainReviveCoinErrorCode === 0) {
@@ -584,7 +590,6 @@ async function runActions(session) {
     console.log('gainReviveCoin: skipped', JSON.stringify(gainReviveCoinResponse));
   }
 
-  // 3. 상점에서 쓰고 남은 골드 + 보상 받은 골드를 합산하여 최종 골드 계산
   const finalGold = Math.max(0, loginGold - spentGold) + (gainReviveCoinErrorCode === 0 ? REVIVE_COIN_GOLD_BONUS : 0);
   console.log('finalEstimatedGold:', finalGold);
 }
