@@ -526,7 +526,7 @@ async function runActions(session) {
   let spentGold = 0;
   const purchasePlan = [];
 
-  if (BUY_GREEN_GIFT && loginGold >= GREEN_GIFT_PRICE_GOLD) {
+if (BUY_GREEN_GIFT && loginGold >= GREEN_GIFT_PRICE_GOLD) {
     const shopInfoResponse = await common('.lq.Lobby.fetchShopInfo', proto.ResShopInfo);
     const zhpGoods = shopInfoResponse.shop_info?.zhp?.goods;
     if (!zhpGoods) {
@@ -535,43 +535,68 @@ async function runActions(session) {
     console.log('fetchShopInfo.shop_info.zhp.goods:', JSON.stringify(zhpGoods));
 
     const greenGoodsIds = zhpGoods.slice(0, 4).map(Number).filter(id => Number.isInteger(id) && id > 0);
-    const maxTotalBuyable = Math.floor(loginGold / GREEN_GIFT_PRICE_GOLD);
-    let remainingPurchaseCount = Math.min(maxTotalBuyable, greenGoodsIds.length * GREEN_GIFT_MAX_COUNT_PER_GOODS);
+    
+    // 1개씩 구매를 추적하기 위해 맵 형태로 관리하거나 개별 카우터를 사용합니다.
+    const goodsCounts = {};
+    greenGoodsIds.forEach(id => { goodsCounts[id] = 0; });
 
-    for (const goodsId of greenGoodsIds) {
-      if (remainingPurchaseCount <= 0) {
+    while (true) {
+      // 현재 남은 소금이 다음 구매 비용(15,000원)보다 적으면 중단
+      const currentRemainingGold = loginGold - spentGold;
+      if (currentRemainingGold < GREEN_GIFT_PRICE_GOLD) {
+        console.log(`Stop purchasing: Insufficient gold (${currentRemainingGold}).`);
         break;
       }
 
-      const count = Math.min(GREEN_GIFT_MAX_COUNT_PER_GOODS, remainingPurchaseCount);
-      
+      // 소지가격이 15000원 이상 18000원 미만이면 중단하는 조건
+      if (currentRemainingGold >= 15000 && currentRemainingGold < 18000) {
+        console.log(`Stop purchasing: Remaining gold (${currentRemainingGold}) is in the [15000, 18000) range.`);
+        break;
+      }
+
+      // 아직 최대 4개에 도달하지 않은 상품 찾기
+      let targetGoodsId = null;
+      for (const goodsId of greenGoodsIds) {
+        if (goodsCounts[goodsId] < GREEN_GIFT_MAX_COUNT_PER_GOODS) {
+          targetGoodsId = goodsId;
+          break;
+        }
+      }
+
+      // 더 이상 살 수 있는 상품이 없으면 중단
+      if (!targetGoodsId) {
+        console.log('Stop purchasing: All goods reached max count per goods.');
+        break;
+      }
+
+      // 1개씩 구매 요청
       const buyResponse = await call(
         '.lq.Lobby.buyFromZHP',
         proto.ReqBuyFromZHP,
-        { goods_id: goodsId, count },
+        { goods_id: targetGoodsId, count: 1 },
         proto.ResCommon
       );
       const errorCode = Number(buyResponse?.error?.code ?? 0);
 
       if (errorCode === BUY_FROM_ZHP_LIMIT_REACHED_CODE) {
         console.log(
-          `buyFromZHP: skip all purchases for this run (goods_id=${goodsId}, count=${count}, purchase limit reached):`,
+          `buyFromZHP: skip all purchases for this run (goods_id=${targetGoodsId}, purchase limit reached):`,
           JSON.stringify(buyResponse)
         );
         break;
       }
       if (errorCode !== 0) {
-        fail(`buyFromZHP failed for goods_id=${goodsId} count=${count}: ${JSON.stringify(buyResponse)}`);
+        fail(`buyFromZHP failed for goods_id=${targetGoodsId} count=1: ${JSON.stringify(buyResponse)}`);
       }
 
-      purchasePlan.push({ goods_id: goodsId, count });
-      remainingPurchaseCount -= count;
-      spentGold += count * GREEN_GIFT_PRICE_GOLD;
+      goodsCounts[targetGoodsId] += 1;
+      spentGold += GREEN_GIFT_PRICE_GOLD;
+    }
 
-      const currentRemainingGold = loginGold - spentGold;
-
-      if (currentRemainingGold >= 15000 && currentRemainingGold < 18000) {
-        break;
+    // purchasePlan 형식으로 변환하여 기존 로그와 호환 유지
+    for (const [goodsId, count] of Object.entries(goodsCounts)) {
+      if (count > 0) {
+        purchasePlan.push({ goods_id: Number(goodsId), count });
       }
     }
 
